@@ -1,0 +1,75 @@
+# Reusable workflow that creates base images, as specified in the
+# repository Dockerfile (most commonly, with build dependencies and
+# devtools virtualenv pre-installed).
+#
+# Notes:
+#
+#   - Docker registry is always Github’s own ghcr.io.
+#
+#   - Dockerfile path must be debian/images/Dockerfile.
+#
+#   - the supplied codenames are used as raw image labels.
+
+name: Docker dependency images
+
+
+on:
+  workflow_call:
+    inputs:
+      codenames:
+        type: string
+        required: true
+        description: "Stringified JSON array listing target codenames"
+    secrets:
+      repository:
+        required: true
+        description: >-
+          The repository name, as in org-name/reponame.
+
+          MUST BE FULLY IN LOWERCASE.
+
+          This is a secret, and not an input, because we use org-wide
+          secrets to provide a lowercase version of organization names,
+          and still work across forks, without hard-coding any names.
+
+
+jobs:
+  build-image:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(inputs.codenames) }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to container registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        name: Extract tags and labels for Docker
+        uses: docker/metadata-action@v3
+        with:
+          tags: |
+            type=raw,${{ matrix.target }}
+          flavor: |
+            latest=false
+          images: ghcr.io/${{ secrets.repository }}
+
+      - name: Build image and push to registry
+        uses: docker/build-push-action@v2
+        with:
+          file: debian/images/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          push: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CODENAME=${{ matrix.target }}
+          cache-to: type=registry,ref=ghcr.io/${{ secrets.repository }}:${{ matrix.target }}-cache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ secrets.repository }}:${{ matrix.target }}-cache
