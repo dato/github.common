@@ -1,0 +1,92 @@
+name: Various jobs for IRC notifications (and others)
+
+on:
+  workflow_call:
+    inputs:
+      server:
+        type: string
+        default: 'irc.libera.chat'
+      channel:
+        type: string
+        default: '##Tina.pm-changes'
+      nickname:
+        type: string
+        default: 'Tina-bot'
+    secrets:
+      password:
+        required: false
+        description: >-
+          The SASL password for the bot account.
+
+jobs:
+  gh:
+    runs-on: ubuntu-latest
+    steps:
+      # For issues, just print the verb (opened, closed..) and the URL.
+      - if: github.event_name == 'issues'
+        uses: rectalogic/notify-irc@v1
+        with:
+          server: ${{ inputs.server }}
+          channel: ${{ inputs.channel }}
+          nickname: ${{ inputs.nickname }}
+          sasl_password: ${{ secrets.password }}
+          message: >-
+            ${{ github.repository }}:
+            ${{ github.actor }}
+            ${{ github.event.action }} issue
+            #${{ github.event.issue.number }}
+            ("${{ github.event.issue.title }}\") –
+            <${{ github.event.issue.html_url }}>
+
+      # For reviews, use `review.state` to indicate if approved or not.
+      - if: github.event_name == 'pull_request_review'
+        uses: rectalogic/notify-irc@v1
+        with:
+          server: ${{ inputs.server }}
+          channel: ${{ inputs.channel }}
+          nickname: ${{ inputs.nickname }}
+          sasl_password: ${{ secrets.password }}
+          message: >-
+            ${{ github.repository }}:
+            ${{ github.actor }}
+            ${{ github.event.review.state }} on PR
+            #${{ github.event.pull_request.number }}
+            ("${{ github.event.pull_request.title }}\") –
+            <${{ github.event.pull_request.html_url }}>
+
+      # Pull requests themselves can use some clarification on whehter
+      # they are draft or not or —if closed— whether they wer actually
+      # merged, or closed with unmerged commits. We gather that info
+      # here, and use it in the following step.
+      - id: prinfo
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ ${{ github.event.pull_request.draft }} = 'false' ]; then
+            echo "::set-output name=draft::"
+          else
+            echo "::set-output name=draft::draft"
+          fi
+
+          if [ ${{ github.event.action }} != 'closed' ]; then
+            echo "::set-output name=action::${{ github.event.action }}"
+          elif [ ${{ github.event.pull_request.merged }} = 'true' ]; then
+            echo "::set-output name=merged::merged"
+          else
+            echo "::set-output name=merged::closed"
+          fi
+
+      - if: github.event_name == 'pull_request'
+        uses: rectalogic/notify-irc@v1
+        with:
+          server: ${{ inputs.server }}
+          channel: ${{ inputs.channel }}
+          nickname: ${{ inputs.nickname }}
+          sasl_password: ${{ secrets.password }}
+          message: >-
+            ${{ github.repository }}:
+            ${{ github.actor }}
+            ${{ steps.prinfo.outputs.action }}
+            ${{ steps.prinfo.outputs.draft }} PR
+            #${{ github.event.pull_request.number }}
+            ("${{ github.event.pull_request.title }}\") –
+            <${{ github.event.pull_request.html_url }}>
